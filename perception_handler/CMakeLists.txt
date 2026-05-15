@@ -13,7 +13,7 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(OpenCV REQUIRED)
-
+find_package(geometry_msgs REQUIRED)
 # =========================
 # INCLUDE DIRECTORIES
 # =========================
@@ -96,6 +96,39 @@ target_link_libraries(
   ${OpenCV_LIBS}
 )
 
+add_executable(temporal_lane_detect
+  src/temporal_sobel_lookahead_detect.cpp
+)
+
+ament_target_dependencies(
+  temporal_lane_detect
+  rclcpp
+  sensor_msgs
+  cv_bridge
+  geometry_msgs
+)
+
+target_link_libraries(
+  temporal_lane_detect
+  ${OpenCV_LIBS}
+)
+
+add_executable(multi_confidence_lane_detect
+  src/multi_factor_confidense_lane_detect.cpp
+)
+
+ament_target_dependencies(
+  multi_confidence_lane_detect
+  rclcpp
+  sensor_msgs
+  cv_bridge
+  geometry_msgs
+)
+
+target_link_libraries(
+  multi_confidence_lane_detect
+  ${OpenCV_LIBS}
+)
 # =========================
 # INSTALL TARGETS
 # =========================
@@ -105,6 +138,8 @@ install(TARGETS
   lane_detect_pid_control
   sliding_window
   hsv_tuner
+  temporal_lane_detect
+  multi_confidence_lane_detect
   DESTINATION lib/${PROJECT_NAME}
 )
 

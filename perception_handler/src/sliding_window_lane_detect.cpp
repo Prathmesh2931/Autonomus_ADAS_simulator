@@ -23,7 +23,7 @@ class LaneDetector : public rclcpp::Node {
     
     private:
         void image_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
-            // ========== STEP 0: CONVERT AND PREPROCESS ==========
+            //  STEP 0: CONVERT AND PREPROCESS 
             cv::Mat bgr_image = cv_bridge::toCvShare(msg, "bgr8")->image;
             cv::Mat original_image = bgr_image.clone();
             
@@ -48,7 +48,7 @@ class LaneDetector : public rclcpp::Node {
             cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5,5));
             cv::morphologyEx(lane_mask, lane_mask, cv::MORPH_CLOSE, kernel);
 
-            // ========== STEP 1: REGION OF INTEREST ==========
+            //  STEP 1: REGION OF INTEREST 
             cv::Mat roi_mask = cv::Mat::zeros(lane_mask.size(), lane_mask.type());
             
             std::vector<cv::Point> roi_points;
@@ -66,7 +66,7 @@ class LaneDetector : public rclcpp::Node {
             auto roi_debug_msg = cv_bridge::CvImage(msg->header, "bgr8", debug_roi).toImageMsg();
             roi_display_pub->publish(*roi_debug_msg);
 
-            // ========== STEP 2: BIRD'S EYE TRANSFORM ==========
+            //  STEP 2: BIRD'S EYE TRANSFORM 
             cv::Mat birds_eye, perspective_transform, inverse_transform;
 
             // Source points (trapezoid ROI)
@@ -89,7 +89,7 @@ class LaneDetector : public rclcpp::Node {
             cv::warpPerspective(lane_mask, birds_eye, perspective_transform, 
                                 cv::Size(width, height));
 
-            // ========== STEP 3: HISTOGRAM ==========
+            //  STEP 3: HISTOGRAM 
             std::vector<int> histogram(width, 0);
             int bottom_start = height * 0.7;
 
@@ -141,7 +141,7 @@ class LaneDetector : public rclcpp::Node {
             cv::imshow("Histogram", hist_img);
             cv::waitKey(1);
 
-            // ========== STEP 4: SLIDING WINDOWS ==========
+            //  STEP 4: SLIDING WINDOWS 
             std::vector<cv::Point> left_pixels, right_pixels;
             int n_windows = 9;
             int window_height = height / n_windows;
@@ -169,7 +169,7 @@ class LaneDetector : public rclcpp::Node {
                 cv::findNonZero(left_roi, left_indices);
                 
                 for (auto& idx : left_indices) {
-                    cv::Point left_pt(idx.x + left_win_x, idx.y + y_low);  // FIX: was undeclared 'p'
+                    cv::Point left_pt(idx.x + left_win_x, idx.y + y_low);  
                     left_pixels.push_back(left_pt);
                     cv::circle(sliding_debug, left_pt, 2, cv::Scalar(0, 0, 255), -1);
                 }
@@ -191,7 +191,7 @@ class LaneDetector : public rclcpp::Node {
                 cv::findNonZero(right_roi, right_indices);
                 
                 for (auto& idx : right_indices) {
-                    cv::Point right_pt(idx.x + right_win_x, idx.y + y_low);  // FIX: was undeclared 'p'
+                    cv::Point right_pt(idx.x + right_win_x, idx.y + y_low);  
                     right_pixels.push_back(right_pt);
                     cv::circle(sliding_debug, right_pt, 2, cv::Scalar(0, 255, 255), -1);
                 }
@@ -208,7 +208,7 @@ class LaneDetector : public rclcpp::Node {
             cv::imshow("Sliding Window Debug", sliding_debug);
             cv::waitKey(1);
 
-            // ========== STEP 5: POLYNOMIAL FITTING ==========
+            //  STEP 5: POLYNOMIAL FITTING 
             cv::Mat curve_display = original_image.clone();
             
             // Left lane polynomial
@@ -282,7 +282,7 @@ class LaneDetector : public rclcpp::Node {
                 }
             }
 
-            // ========== STEP 6: PUBLISH DEBUG TOPICS ==========
+            //  STEP 6: PUBLISH DEBUG TOPICS 
             auto mask_msg = cv_bridge::CvImage(msg->header, "mono8", lane_mask).toImageMsg();
             debug_img_pub->publish(*mask_msg);
             

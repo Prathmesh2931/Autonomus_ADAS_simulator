@@ -38,3 +38,17 @@
                                 Final Lane Overlay
 
 10. There is one fault thing where lets suppose i am going too left on road then red curve is dominating but with that if it is not able to detect some of the yellow lines then probably blue line gets merge into red one which i dont want , in that case it should not go in that direction like we should conclude that it is going out of bounding road it need steer in the opposite direction.
+
+11. System can break in below things :shadows, glare, overexposure, faded lanes, road reflections, nighttime, different asphalt textures
+
+12. Histogram can fail at : intersections, lane splits, merges, sharp exits (Because of 2 vertical dominant line)
+
+13. Can upgrade to Semantic segmentation.Example:ENet, SCNN, LaneNet, UltraFast Lane Detection
+
+14. Next Upgrade is done with below : 1. TEMPORAL SMOOTHING , 2. LOOKAHEAD STEERING , 3. SOBEL + HSV COMBINED MASK , 4. DYNAMIC LANE WIDTH , 5. KALMAN FILTER  ,6. PURE PURSUIT / STANLEY ,7. SEMANTIC SEGMENTATION
+
+15. Problem in my newer code base : confidence is always 90 for both lane detection but they were overlapped in that case too my concern is that if these is situation then whatever side car is sterring it need to also  look out for opposite direction in these case. 
+
+16. While there is turn in that case polynomial curve will eventually tell these to us then why the speed of my car is not reduced. In the case if both curve are drastically fluctuating at that point bot should slow up dont u think so . There can be such more cases with we can make our algo robust 
+
+17. Then why in the temporal sobel lookahead there is issue where if only edge is been detected then why vehicle is following that same edge technically it should steer away a bit and try to fit in the middle of both left and right edge and tell me if white lets suppose is blue then both of edge are pointing same curve then these is flaw of it dont u think. And I Dont get sudden fluctuation of curve edge how is it possible there is some point that we are missing check it . And if there are curve that are like so curvy then make confidense a bit less it will help me out like  50 to 60 .which will slow out speed in these case . 

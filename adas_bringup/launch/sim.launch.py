@@ -13,7 +13,7 @@ def generate_launch_description():
  
     # Tell Ignition where to find the model
     model_path = os.path.join(sim_share, 'models')
-    world_file = os.path.join(sim_share, 'worlds', 'lane_world.sdf')
+    world_file = os.path.join(sim_share, 'worlds', 's_track_world.sdf')
     bridge_cfg  = os.path.join(bringup_share, 'config', 'bridge.yaml')
     pkg_ros_gz_sim = get_package_share_directory('ros_gz_sim')
 

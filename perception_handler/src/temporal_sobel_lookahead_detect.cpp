@@ -7,6 +7,7 @@
 #include <numeric>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 class LaneDetector : public rclcpp::Node {
 public:
@@ -25,33 +26,30 @@ public:
         prev_left_coeff_ = cv::Mat::zeros(3, 1, CV_32F);
         prev_right_coeff_ = cv::Mat::zeros(3, 1, CV_32F);
         prev_lane_center_ = width_ * 0.5;
-        lane_width_history_.resize(10, 100.0f); // initial guess
+        lane_width_history_.resize(10, 100.0f);
     }
 
 private:
     void image_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
-        //  0. PREPROCESS 
         cv::Mat bgr_image = cv_bridge::toCvShare(msg, "bgr8")->image;
         cv::Mat original_image = bgr_image.clone();
         int height = bgr_image.rows;
         int width = bgr_image.cols;
-        width_ = width;  // store for later
+        width_ = width;
 
         cv::GaussianBlur(bgr_image, bgr_image, cv::Size(5,5), 0);
 
-        // Convert to HSV and grayscale for Sobel
+        // ---- HSV + Sobel mask (same as before) ----
         cv::Mat hsv, gray;
         cv::cvtColor(bgr_image, hsv, cv::COLOR_BGR2HSV);
         cv::cvtColor(bgr_image, gray, cv::COLOR_BGR2GRAY);
 
-        // ---- HSV mask ----
         cv::Mat white_mask, yellow_mask;
         cv::inRange(hsv, cv::Scalar(0, 0, 160), cv::Scalar(180, 80, 255), white_mask);
         cv::inRange(hsv, cv::Scalar(15, 80, 80), cv::Scalar(40, 255, 255), yellow_mask);
         cv::Mat hsv_mask;
         cv::bitwise_or(white_mask, yellow_mask, hsv_mask);
 
-        // ---- Sobel edge mask (vertical gradients) ----
         cv::Mat sobel_x, sobel_mask;
         cv::Sobel(gray, sobel_x, CV_64F, 1, 0, 3);
         sobel_x = cv::abs(sobel_x);
@@ -59,15 +57,13 @@ private:
         sobel_x.convertTo(sobel_x, CV_8U);
         cv::threshold(sobel_x, sobel_mask, 50, 255, cv::THRESH_BINARY);
 
-        // ---- Combine masks (OR) ----
         cv::Mat lane_mask;
         cv::bitwise_or(hsv_mask, sobel_mask, lane_mask);
 
-        // Morphological closing
         cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5,5));
         cv::morphologyEx(lane_mask, lane_mask, cv::MORPH_CLOSE, kernel);
 
-        //  1. REGION OF INTEREST (YOUR ORIGINAL COORDINATES) 
+        // ---- ROI (your exact coordinates) ----
         cv::Mat roi_mask = cv::Mat::zeros(lane_mask.size(), lane_mask.type());
         std::vector<cv::Point> roi_points;
         roi_points.push_back(cv::Point(width * 0.01, height));
@@ -77,29 +73,27 @@ private:
         cv::fillPoly(roi_mask, roi_points, cv::Scalar(255));
         cv::bitwise_and(lane_mask, roi_mask, lane_mask);
 
-        // Debug ROI visualization
         cv::Mat debug_roi = original_image.clone();
         cv::polylines(debug_roi, roi_points, true, cv::Scalar(0, 255, 0), 2);
         auto roi_debug_msg = cv_bridge::CvImage(msg->header, "bgr8", debug_roi).toImageMsg();
         roi_display_pub->publish(*roi_debug_msg);
 
-        //  2. BIRD'S EYE TRANSFORM (YOUR ORIGINAL) 
+        // ---- BEV transform (your original) ----
         cv::Mat birds_eye, perspective_transform, inverse_transform;
-        std::vector<cv::Point2f> src_pts;
-        src_pts.push_back(cv::Point2f(width * 0.15, height));
-        src_pts.push_back(cv::Point2f(width * 0.45, height * 0.35));
-        src_pts.push_back(cv::Point2f(width * 0.55, height * 0.35));
-        src_pts.push_back(cv::Point2f(width * 0.85, height));
-        std::vector<cv::Point2f> dst_pts;
-        dst_pts.push_back(cv::Point2f(width * 0.25, height));
-        dst_pts.push_back(cv::Point2f(width * 0.25, 0));
-        dst_pts.push_back(cv::Point2f(width * 0.75, 0));
-        dst_pts.push_back(cv::Point2f(width * 0.75, height));
+        std::vector<cv::Point2f> src_pts, dst_pts;
+        src_pts = {cv::Point2f(width * 0.15, height),
+                   cv::Point2f(width * 0.45, height * 0.35),
+                   cv::Point2f(width * 0.55, height * 0.35),
+                   cv::Point2f(width * 0.85, height)};
+        dst_pts = {cv::Point2f(width * 0.25, height),
+                   cv::Point2f(width * 0.25, 0),
+                   cv::Point2f(width * 0.75, 0),
+                   cv::Point2f(width * 0.75, height)};
         perspective_transform = cv::getPerspectiveTransform(src_pts, dst_pts);
         inverse_transform = cv::getPerspectiveTransform(dst_pts, src_pts);
         cv::warpPerspective(lane_mask, birds_eye, perspective_transform, cv::Size(width, height));
 
-        //  3. HISTOGRAM & SLIDING WINDOW (YOUR ORIGINAL LOGIC) 
+        // ---- Histogram & Sliding Window ----
         std::vector<int> histogram(width, 0);
         int bottom_start = height * 0.7;
         for (int y = bottom_start; y < height; ++y) {
@@ -112,10 +106,7 @@ private:
         int right_base = std::max_element(histogram.begin() + midpoint, histogram.end()) - histogram.begin();
 
         std::vector<cv::Point> left_pixels, right_pixels;
-        int n_windows = 9;
-        int window_height = height / n_windows;
-        int margin = 80;
-        int min_pixels = 25;
+        int n_windows = 9, window_height = height / n_windows, margin = 80, min_pixels = 25;
         int left_x = left_base, right_x = right_base;
 
         for (int w = 0; w < n_windows; ++w) {
@@ -127,10 +118,8 @@ private:
             cv::Mat left_roi = birds_eye(left_win);
             std::vector<cv::Point> left_idx;
             cv::findNonZero(left_roi, left_idx);
-            for (auto& idx : left_idx) {
-                cv::Point pt(idx.x + left_win_x, idx.y + y_low);
-                left_pixels.push_back(pt);
-            }
+            for (auto& idx : left_idx)
+                left_pixels.push_back(cv::Point(idx.x + left_win_x, idx.y + y_low));
             if (left_idx.size() > (size_t)min_pixels) {
                 int sum = 0;
                 for (auto& idx : left_idx) sum += idx.x;
@@ -143,10 +132,8 @@ private:
             cv::Mat right_roi = birds_eye(right_win);
             std::vector<cv::Point> right_idx;
             cv::findNonZero(right_roi, right_idx);
-            for (auto& idx : right_idx) {
-                cv::Point pt(idx.x + right_win_x, idx.y + y_low);
-                right_pixels.push_back(pt);
-            }
+            for (auto& idx : right_idx)
+                right_pixels.push_back(cv::Point(idx.x + right_win_x, idx.y + y_low));
             if (right_idx.size() > (size_t)min_pixels) {
                 int sum = 0;
                 for (auto& idx : right_idx) sum += idx.x;
@@ -154,12 +141,22 @@ private:
             }
         }
 
-        //  4. POLYNOMIAL FITTING & DYNAMIC WIDTH 
+        // ---- Polynomial fitting ----
         cv::Mat left_coeff = fitPolyFromPoints(left_pixels, 2);
         cv::Mat right_coeff = fitPolyFromPoints(right_pixels, 2);
 
-        // Temporal smoothing (exponential moving average)
-        float alpha = 0.7;  // weight for previous frame
+        // ---- 🔧 FIX 1: Ensure left < right at bottom (swap if needed) ----
+        if (!left_coeff.empty() && !right_coeff.empty()) {
+            float left_bottom = evaluatePoly(left_coeff, height - 10);
+            float right_bottom = evaluatePoly(right_coeff, height - 10);
+            if (left_bottom > right_bottom) {
+                std::swap(left_coeff, right_coeff);
+                RCLCPP_WARN(this->get_logger(), "Swapped left/right lanes (incorrect assignment)");
+            }
+        }
+
+        // Temporal smoothing (alpha = 0.7 → strong smoothing to kill fluctuations)
+        const float alpha = 0.7;
         if (!left_coeff.empty()) {
             left_coeff = alpha * prev_left_coeff_ + (1 - alpha) * left_coeff;
             prev_left_coeff_ = left_coeff;
@@ -174,21 +171,39 @@ private:
         }
 
         // Dynamic lane width (rolling average)
-        float lane_width_px = 120.0f;  // default
+        float lane_width_px = 120.0f;
         if (!left_coeff.empty() && !right_coeff.empty()) {
-            float left_at_bottom = evaluatePoly(left_coeff, height - 10);
-            float right_at_bottom = evaluatePoly(right_coeff, height - 10);
-            lane_width_px = right_at_bottom - left_at_bottom;
-            if (lane_width_px > 50 && lane_width_px < 300) {
-                lane_width_history_.push_front(lane_width_px);
+            float left_bottom = evaluatePoly(left_coeff, height - 10);
+            float right_bottom = evaluatePoly(right_coeff, height - 10);
+            float width_now = right_bottom - left_bottom;
+            if (width_now > 50 && width_now < 300) {
+                lane_width_history_.push_front(width_now);
                 if (lane_width_history_.size() > 10) lane_width_history_.pop_back();
                 lane_width_px = std::accumulate(lane_width_history_.begin(), lane_width_history_.end(), 0.0f) / lane_width_history_.size();
             }
         }
 
-        //  5. LOOKAHEAD STEERING 
-        float lookahead_y = height * 0.7;  // look further ahead than bottom
-        float target_x = width / 2.0f;     // desired lane center at lookahead
+        // ---- 🔧 FIX 2: Curvature‑based confidence reduction ----
+        float curvature_penalty = 1.0f;
+        if (!left_coeff.empty()) {
+            float a2 = left_coeff.at<float>(2);  // coefficient for y^2
+            float curvature = std::abs(2.0f * a2); // approximate curvature in image coords
+            const float MAX_CURV = 0.008f;        // tune this for your track
+            if (curvature > MAX_CURV) {
+                curvature_penalty = std::max(0.5f, 1.0f - (curvature - MAX_CURV) / MAX_CURV);
+            }
+        }
+        if (!right_coeff.empty()) {
+            float a2 = right_coeff.at<float>(2);
+            float curvature = std::abs(2.0f * a2);
+            if (curvature > 0.008f) {
+                curvature_penalty = std::min(curvature_penalty, std::max(0.5f, 1.0f - (curvature - 0.008f) / 0.008f));
+            }
+        }
+
+        // ---- Lookahead steering (y = 0.7 * height) ----
+        float lookahead_y = height * 0.7;
+        float target_x = width / 2.0f;
         float confidence = 0.0f;
 
         if (!left_coeff.empty() && !right_coeff.empty()) {
@@ -209,25 +224,27 @@ private:
             confidence = 0.1f;
         }
 
+        // Apply curvature penalty (reduce confidence on sharp curves)
+        confidence *= curvature_penalty;
+        confidence = std::clamp(confidence, 0.1f, 0.95f);
+
         // Smooth lane center over time
         target_x = 0.8 * prev_lane_center_ + 0.2 * target_x;
         prev_lane_center_ = target_x;
 
-        // Compute steering error (normalized -1..1)
+        // Steering error (normalized)
         float error = (target_x - width/2.0f) / (width/2.0f);
-        float steering = -error * 0.6;   // P controller gain, tuned
+        float steering = -error * 0.6;
 
-        //  6. CONTROL PUBLISHER 
+        // Control
         geometry_msgs::msg::Twist cmd;
         float max_speed = 0.5;
-        cmd.linear.x = max_speed * std::max(0.2f, confidence);
+        cmd.linear.x = max_speed * confidence;   // speed automatically drops on curves
         cmd.angular.z = steering;
         cmd_vel_pub->publish(cmd);
 
-        //  7. DEBUG VISUALIZATION (KEEP YOUR EXISTING) 
-        // You already have curve_drawing code; I'll reuse the original drawing style
+        // ---- Visualization (unchanged) ----
         cv::Mat curve_display = original_image.clone();
-        // Draw left and right curves in BEV then transform back (same as your original)
         if (!left_coeff.empty()) {
             std::vector<cv::Point2f> bev_curve;
             for (int y = 0; y < height; y += 5) {
@@ -255,7 +272,6 @@ private:
             }
         }
 
-        // Publish topics
         auto mask_msg = cv_bridge::CvImage(msg->header, "mono8", lane_mask).toImageMsg();
         debug_img_pub->publish(*mask_msg);
         auto bev_msg = cv_bridge::CvImage(msg->header, "mono8", birds_eye).toImageMsg();
@@ -265,12 +281,11 @@ private:
 
         static int frame_count = 0;
         if (frame_count++ % 30 == 0) {
-            RCLCPP_INFO(this->get_logger(), "Confidence: %.2f, Steering: %.3f, Speed: %.2f",
-                        confidence, steering, cmd.linear.x);
+            RCLCPP_INFO(this->get_logger(), "Confidence: %.2f | Curvature penalty: %.2f | Steering: %.3f | Speed: %.2f",
+                        confidence, curvature_penalty, steering, cmd.linear.x);
         }
     }
 
-    // Helper: polynomial fitting from points (same as yours)
     cv::Mat fitPolyFromPoints(const std::vector<cv::Point>& points, int degree) {
         if (points.size() < (size_t)degree + 1) return cv::Mat();
         std::vector<cv::Point2f> pts;
@@ -290,10 +305,9 @@ private:
         cv::solve(X, Y, coeff, cv::DECOMP_QR);
         return coeff;
     }
-    
+
     float evaluatePoly(const cv::Mat& coeff, float y) {
         if (coeff.empty()) return -1;
-        // coeff is column vector [c0, c1, c2] for x = c0 + c1*y + c2*y^2
         return coeff.at<float>(0) + coeff.at<float>(1)*y + coeff.at<float>(2)*y*y;
     }
 
@@ -304,7 +318,6 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr curve_pub;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub;
 
-    // Temporal memory
     cv::Mat prev_left_coeff_, prev_right_coeff_;
     float prev_lane_center_;
     std::deque<float> lane_width_history_;

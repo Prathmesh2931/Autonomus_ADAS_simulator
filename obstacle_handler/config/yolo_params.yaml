@@ -1,0 +1,21 @@
+obstacle_handler:
+  ros__parameters:
+    # Weights path — place yolov8n.onnx here inside your sim_world package
+    # Export: python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt').export(format='onnx')"
+    model_path: "yolov8n.onnx"
+
+    # YOLOv8 always runs a 640×640 blob internally.
+    # These are kept for reference but the node hardcodes 640×640 for the blob.
+    input_width:  640
+    input_height: 480   # actual SDF camera resolution (640×480)
+
+    # Derived from SDF camera specs:
+    #   horizontal_fov = 1.3962634 rad (~80°)
+    #   focal_length_px = (image_width / 2) / tan(hfov / 2)
+    #                   = (640 / 2) / tan(40°)
+    #                   ≈ 381 px
+    focal_length_px: 381.0
+
+    # Detections whose centre-x is beyond ±this fraction of half-width
+    # are considered off-path and ignored (0.30 = middle 60% of frame)
+    path_zone_ratio: 0.30
